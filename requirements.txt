@@ -3,3 +3,5 @@ imutils
 scipy
 cmake
 dlib
+pygame
+streamlit
