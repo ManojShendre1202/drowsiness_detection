@@ -15,8 +15,10 @@ The Drowsiness Detection App leverages advanced deep learning models to accurate
 
 ## Setup Instructions
 1. Clone the Repository: Begin by cloning this repository to your local machine using Git.
-2. Install Dependencies: Install the necessary dependencies by running pip install -r requirements.txt.
-3. Launch the App: Execute the Streamlit app by running streamlit run app.py in your terminal.
+2. Install Dependencies: Install the necessary dependencies by running
+   --pip install -r requirements.txt
+4. Launch the App: Execute the Streamlit app by running
+   -- streamlit run app.py
 
 
 ## Usage Guide
