@@ -1,124 +1,102 @@
-import streamlit as st
-from scipy.spatial import distance
-from imutils import face_utils
-from pygame import mixer
-import imutils
-import dlib
 import cv2
-from detector import *
+import dlib
+import time
+import pygame
+from scipy.spatial import distance as dist
 
-thresh = st.number_input("Threshold", placeholder="Threshold for closed eyes")
-frame_check = st.number_input("Frame Check", placeholder = "Min number of frame to check for the closed eyes",step = 1)
-min_open_frames = st.number_input("Min frames for Video", placeholder="Enter the min frames that mouth should be opened", step = 1) 
-sustained_yawn_threshold = st.number_input("Minimum number of sustained yawns to trigger alert", placeholder="Minimum number of sustained yawns to trigger alert", step = 1)
+# Constants
+EYE_AR_THRESH = 0.20
+EYE_AR_CONSEC_FRAMES = 20 
+TOTAL_BLINK_THRESHOLD = 25
+YAWN_THRESHOLD = 30
+YAWN_MIN_DURATION = 1.5
+YAWN_REPETITION_THRESHOLD = 4
 
+# Global variables
+closed_eyes_counter = 0
+yawn_counter = 0
+yawn_start_time = None
+
+# Load face detector, landmark predictor, and initialize pygame mixer
 detector = dlib.get_frontal_face_detector()
-predictor = dlib.shape_predictor("data/shape_predictor_68_face_landmarks.dat")
+predictor = dlib.shape_predictor("C:/datascienceprojects/drowsiness_detection/data/shape_predictor_68_face_landmarks.dat")
+pygame.mixer.init()
+pygame.mixer.music.load("C:/datascienceprojects/drowsiness_detection/data/music.wav") 
 
-(l_eye_start, l_eye_end) = (42, 48)
-(r_eye_start, r_eye_end) = (36, 42)
-(mouth_start, mouth_end) = (48, 68)
+# Function to calculate Eye Aspect Ratio (EAR)
+def eye_aspect_ratio(eye_points):
+    A = dist.euclidean(eye_points[1], eye_points[5])
+    B = dist.euclidean(eye_points[2], eye_points[4])
+    C = dist.euclidean(eye_points[0], eye_points[3])
+    return (A + B) / (2.0 * C)
 
-counter = 0
-alarm_playing = False
-yawning = False
-max_closed_frames = 5  
+# Main function
+def main():
+    global closed_eyes_counter, yawn_counter, yawn_start_time
+    
+    # Start video capture 
+    cap = cv2.VideoCapture(0)
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-
-# Variables to track yawning state
-yawn_frames = 0
-yawn_count = 0
-sustained_yawn_count = 0
-previous_mouth_closed = True 
-
-
-
-tb1, tb2 = st.tabs(["Live web cam","Settings"])
-with tb1:
-    st.title("Webcam Live Feed")
-    run = st.checkbox('Run', key = "Live feed")
-    FRAME_WINDOW = st.image([])
-    camera = cv2.VideoCapture(0)
-
-    while run:
-        _, frame = camera.read()
-        frame = imutils.resize(frame, width=450)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = detector(gray, 0)
+        faces = detector(gray)
 
         for face in faces:
-            shape = predictor(gray, face)
-            shape = [(shape.part(i).x, shape.part(i).y) for i in range(68)]
-            l_eye = shape[l_eye_start:l_eye_end]
-            r_eye = shape[r_eye_start:r_eye_end]
-            mouth = shape[mouth_start:mouth_end]
+            landmarks = predictor(gray, face)
 
-            l_ear = calculate_ear(l_eye)
-            r_ear = calculate_ear(r_eye)
-            ear = (l_ear + r_ear) / 2.0
+            mouth_points = [(landmarks.part(i).x, landmarks.part(i).y) for i in range(48, 68)]
+            top_lip_center = (mouth_points[13][0] + mouth_points[14][0]) // 2, (mouth_points[13][1] + mouth_points[14][1]) // 2
+            bottom_lip_center = (mouth_points[19][0] + mouth_points[18][0]) // 2, (mouth_points[19][1] + mouth_points[18][1]) // 2
+            lip_distance = abs(top_lip_center[1] - bottom_lip_center[1])
 
-            # Drowsiness detection logic (unchanged)
-            if ear < thresh:
-                counter += 1
-                if counter >= frame_check and not alarm_playing:
-                    cv2.putText(frame, "ALERT! Closing eyes Detected!", (10, 30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    play_alert()
-                    alarm_playing = True
-                    
+            # Yawn detection 
+            if lip_distance > YAWN_THRESHOLD:
+                if yawn_start_time is None:
+                    yawn_start_time = time.time()
+                if time.time() - yawn_start_time >= YAWN_MIN_DURATION:
+                    yawn_counter += 1
+                    if yawn_counter >= YAWN_REPETITION_THRESHOLD:
+                        cv2.putText(frame, "YAWNING", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                        pygame.mixer.music.play()
+                        yawn_counter = 0  
+                    yawn_start_time = None  
             else:
-                counter = 0
-                alarm_playing = False
-
-            mouth_ratio = calculate_mouth_aspect_ratio(mouth)
-
-            # Sustained yawning detection
-            if mouth_ratio > 0.6:
-                yawn_frames += 1
-
-                if previous_mouth_closed:
-                    yawn_frames = 1
-                    previous_mouth_closed = False
-
-                elif yawn_frames >= min_open_frames:
-                    # Mouth has been open for a sustained period
-                    yawn_count += 1
-                    yawn_frames = 0
-            else:  # Mouth closed, potentially between yawns
-                if yawn_frames > 0:  # Mouth was previously open
-                    if yawn_frames <= max_closed_frames:
-                        # Brief closure considered part of the yawn
-                        yawn_frames += 1
-                    else:
-                        # Mouth closed for too long, reset yawn sequence
-                        yawn_frames = 0
-                        yawn_count = 0
-                previous_mouth_closed = True
-
-            if yawn_count >= sustained_yawn_threshold and not alarm_playing:
-                cv2.putText(frame, "ALERT! Excessive Yawning Detected!", (10, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                play_alert()
-                sustained_yawn_count += 1
-                alarm_playing = True
+                yawn_start_time = None
                 
+            for i in range(len(mouth_points) - 1):
+                cv2.line(frame, mouth_points[i], mouth_points[i + 1], (0, 255, 0), 2)
 
-            # Reset counters after alert is played
-            if sustained_yawn_count > 0 and not alarm_playing:
-                sustained_yawn_count = 0
+            left_eye_points = [(landmarks.part(i).x, landmarks.part(i).y) for i in range(36, 42)]
+            right_eye_points = [(landmarks.part(i).x, landmarks.part(i).y) for i in range(42, 48)]
 
-            # Draw facial landmarks and yawning count
-            cv2.drawContours(frame, [cv2.convexHull(np.array(mouth))], -1, (0, 255, 0), 1)
-            cv2.putText(frame, f"Yawning Count: {yawn_count}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            left_ear = eye_aspect_ratio(left_eye_points)
+            right_ear = eye_aspect_ratio(right_eye_points)
+            ear = (left_ear + right_ear) / 2.0  
 
-            cv2.drawContours(frame, [cv2.convexHull(np.array(l_eye))], -1, (0, 255, 0), 1)
-            cv2.drawContours(frame, [cv2.convexHull(np.array(r_eye))], -1, (0, 255, 0), 1)
-            cv2.drawContours(frame, [cv2.convexHull(np.array(mouth))], -1, (0, 255, 0), 1)
+            # Eye closure detection
+            if ear < EYE_AR_THRESH:
+                closed_eyes_counter += 1
+                if closed_eyes_counter >= TOTAL_BLINK_THRESHOLD:
+                    if closed_eyes_counter >= EYE_AR_CONSEC_FRAMES:
+                        cv2.putText(frame, "DROWSINESS ALERT!", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        pygame.mixer.music.play()  
+            else:
+                closed_eyes_counter = 0
+        for point in left_eye_points:
+            cv2.circle(frame, point, 2, (0, 255, 0), -1)
+        for point in right_eye_points:
+            cv2.circle(frame, point, 2, (0, 255, 0), -1)
+        cv2.imshow('Drowsiness Detection', frame)
 
-        FRAME_WINDOW.image(frame)
-    else:
-        st.write('Stopped')
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-with tb2:
-    st.write("Settings")
+    cap.release()
+    cv2.destroyAllWindows()
 
+if __name__ == "__main__":
+    main()
