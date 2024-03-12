@@ -3,6 +3,7 @@ import dlib
 import time
 import pygame
 from scipy.spatial import distance as dist
+import streamlit as st
 
 # Constants
 EYE_AR_THRESH = 0.20
@@ -34,10 +35,11 @@ def eye_aspect_ratio(eye_points):
 def main():
     global closed_eyes_counter, yawn_counter, yawn_start_time
     
-    # Start video capture 
+    run = st.checkbox('Run')
+    FRAME_WINDOW = st.image([])
     cap = cv2.VideoCapture(0)
     
-    while True:
+    while run:
         ret, frame = cap.read()
         if not ret:
             break
@@ -90,13 +92,12 @@ def main():
             cv2.circle(frame, point, 2, (0, 255, 0), -1)
         for point in right_eye_points:
             cv2.circle(frame, point, 2, (0, 255, 0), -1)
-        cv2.imshow('Drowsiness Detection', frame)
+        
+        # Display the processed frame using Streamlit's st.image()
+        FRAME_WINDOW.image(frame, channels="BGR")
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
+    else:
+        st.write('Stopped')
 
 if __name__ == "__main__":
     main()
